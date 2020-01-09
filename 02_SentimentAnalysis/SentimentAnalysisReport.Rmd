@@ -1,0 +1,255 @@
+---
+title: 'Text Sentiment Analysis Project'
+author: "Praveen Srivatsa"
+date: "January 9, 2020"
+output:
+  pdf_document: default
+---
+
+
+```{r image, echo=FALSE, fig.cap="Sentiment Analysis"}
+knitr::include_graphics("sentiment.png")
+```
+
+# Introduction and Executive Summary
+
+```{r wrap-hook, message=FALSE, warning=FALSE,eval=TRUE,echo=FALSE}
+library(knitr)
+hook_output = knit_hooks$get('output')
+knit_hooks$set(output = function(x, options) {
+  # this hook is used only when the linewidth option is not NULL
+  if (!is.null(n <- options$linewidth)) {
+    x = knitr:::split_lines(x)
+    # any lines wider than n should be wrapped
+    if (any(nchar(x) > n)) x = strwrap(x, width = n)
+    x = paste(x, collapse = '\n')
+  }
+  hook_output(x, options)
+})
+```
+
+For any company, understanding the pulse of their customer is key. With the explosion of social media, people are posting their comments about all things in various places on the internet. Managing and keeping track of what people are talking about the company or its product online is an important part of today's corporate world. However, this is easier said than done.
+
+Instead of trying to read all the posts, comments, tweets etc, companies can choose to use machine learning to understand the sentiment of the user posts and comments. Many companies are successfully leveraging sentiment analysis to understand user behaviours and preferences. Machine Learning techniques can be used to understand the sentiment against a product, a service or a company from the posts and comments about it online. Comments about a product on an online shopping service like Amazon, eBay or BigCommerce is a good indicator of the sentiment of users against specific products. Getting the sentiments of users from their comments against a song on iTunes or a movie on NetFlix is a great indicator of how users are reacting to these releases.
+
+In this project, we take a look at how we can understand sentiment from text data that is collected from twitter. We could expand the same example to get the sentiment for movie reviews, airline sentiment or even just plain email sentiments. This can give a very good birds eye view of understanding sentiment from a large pool of digital comments across the globe.
+
+
+# Methods and techniques
+Let us first understand the methods and techniques of working with sentiment analysis with text data. There are two broad ways of working with text mining and sentiment analysis.
+
+Lets set up the packages for our project. (Note : if you dont already have these packages installed, you might have to run this twice to install and load it)
+
+```{r 1.01 Download and Process, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+if(!require(tidyverse)) 
+  install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(tidytext)) 
+  install.packages("tidytext", repos = "http://cran.us.r-project.org")
+if(!require(textdata)) 
+  install.packages("textdata", repos = "http://cran.us.r-project.org")
+if(!require(tm)) 
+  install.packages("tm", repos = "http://cran.us.r-project.org")
+if(!require(SnowballC)) 
+  install.packages("SnowballC", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) 
+  install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(wordcloud)) 
+  install.packages("wordcloud", repos = "http://cran.us.r-project.org")
+if(!require(caret)) 
+  install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) 
+  install.packages("randomForest", repos = "http://cran.us.r-project.org")
+```
+
+## Simple Text mining and Sentiment Analysis
+Basic text mining has been discussed in many forumns and blogs. In this, the text is broken up into independent words and this is then mapped againt a *dictionary* of sentiment words. Lets take a quick look at how this works.
+
+```{r 2.01 Text wrangling, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+poem <- c("Roses are red,", "Violets are blue,","Sugar is sweet,", "And so are you.")
+example <- tibble(line = c(1, 2, 3, 4),text = poem)
+example
+```
+
+We take this simple poem and tokennize it
+```{r 2.02 Tokennize words, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+example_words <- example %>% unnest_tokens(word, text)
+example_words %>% 
+  count(word) %>%
+  arrange(desc(n))
+```
+
+Then we download and open a sentiments dictionary. There are multiples ones like *bing*, *afinn*, *nrc* or *loughran*. Here lets use the nrc library and join this with our list of words to figure out the sentiment for the words in the poem.
+
+```{r 2.03 Sentiment Dictionaries, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+nrc <- get_sentiments("nrc") %>%
+  select(word, sentiment)
+nrc
+
+example_words %>% inner_join(nrc, by = "word") %>% select(word, sentiment)
+```
+
+But this approach has many limitations. Each word is mapped to a sentiment and the word is prequalified in a dictionary. So a term like "this is not bad" is understood to have 2 negative sentiments instead of a positive (or at the least a neutral) sentiment. Synonyms, Sarcasm, colloquial word usage and different word usage are not directly considered.
+
+An alternate approach is to wrangle the text data and use a dataset that has a sentiment marked against it and let the machine learning algorithm figure out the sentiment using the entire text directly. Lets see how this can be done.
+
+##  Text mining with the tm package.
+The tm package has great features to work with text data. It can read one or many documents and convert it into a *corpus* or a collection of documents. It can then transform this document to remove common words, punctuation, whitespaces etc to make it more easy to work with.
+
+As an example, lets load the *Martin Luther King Speech* and work through the text mining process with this document.
+
+```{r 2.04 Corpus handling, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE,linewidth=90}
+filePath <- "http://www.sthda.com/sthda/RDoc/example-files/martin-luther-king-i-have-a-dream-speech.txt"
+text <- readLines(filePath)
+docs <- Corpus(VectorSource(text))
+
+inspect(docs)
+
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeNumbers)
+docs <- tm_map(docs, removeWords, stopwords("english"))
+docs <- tm_map(docs, removeWords, c("Georgia", "Mississippi")) 
+docs <- tm_map(docs, removePunctuation)
+docs <- tm_map(docs, stripWhitespace)
+
+getTransformations()
+```
+
+It can additionall stem the document - which essentially normalizes all words with the same root. So for example, likes, liked, likely, liking are all transformed as *like*. Additionally we can convert the document into a DocumentTermMatrix using which we can find word frequencies and even build a word cloud.
+
+```{r 2.05 Stemming, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+writeLines(as.character(docs[[2]]))
+docs <- tm_map(docs, stemDocument)
+writeLines(as.character(docs[[2]]))
+
+dcm <- DocumentTermMatrix(docs)
+freq <- findFreqTerms(dcm, lowfreq = 5)
+freq
+
+tfreq <- colSums(as.matrix(dcm))
+wordcloud(names(tfreq),tfreq, min.freq=5)
+```
+
+This allows us to wrangle the data on an existing sentiment dataset and use algorithms like linear regression or knn to improve our sentiment predictions.
+
+# Analysis and Results
+Let's use  a sample dataset of Tweets about Apple from Kaggle from https://www.kaggle.com/c/apple-computers-twitter-sentiment2/data (Note:This requires a login and so the train.csv has been copied to a github repo. You can just download the train.csv from the kaggle site and replace the one that is being used). 
+
+```{r 3.01 Explore the dataset, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+#Set up so that both R and RStudio share the same working directory.
+#Change this appropriately on Mac/Linux or just remove altogether
+setwd("c:\\temp")
+dl <- "train.csv"
+
+# Check for download. If exists, just load it, else download, process and save it.
+if(!file.exists(dl))
+{
+  download.file("https://raw.githubusercontent.com/srivatsapraveen/HDXCapstone/master/02_SentimentAnalysis/data/train.csv", dl)
+}
+
+tweets <- read.csv(dl, stringsAsFactors = FALSE)
+tweets %>% group_by(sentiment) %>% summarize(n())
+```
+As we can see, this has a set of tweets along with a basic score of 1-Negative, 3-Neutral and 5-Positive. For our consideration, lets just map both 1 and 3 to a "N"-Negative score and 5 to a "P"-Positive score.
+We can group this by the sentiment to see how our tweets behave.
+
+```{r 3.02 Transpose the data, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+tweets <- tweets %>% mutate(senti_text = ifelse(sentiment > 3,"P","N")) 
+tweets$senti_text <- as.factor(tweets$senti_text)
+tibble(tweets)
+tweets %>% group_by(senti_text) %>% summarize(n())
+
+```
+
+Lets then cleanup the text using the tm package and the transformations that we saw earlier.
+```{r 3.03 Transform the data, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+tweet_docs <- VCorpus(VectorSource(tweets$text))
+tweet_docs <- tm_map(tweet_docs, PlainTextDocument)
+tweet_docs <- tm_map(tweet_docs, removePunctuation)
+tweet_docs <- tm_map(tweet_docs, removeWords, c("apple", stopwords("english")))
+tweet_docs <- tm_map(tweet_docs, content_transformer(tolower))
+tweet_docs <- tm_map(tweet_docs, stemDocument)
+
+tweet_docMatrix <- DocumentTermMatrix(tweet_docs)
+wordfreq <- findFreqTerms(tweet_docMatrix, lowfreq = 25)
+
+totfreq <- colSums(as.matrix(tweet_docMatrix))
+freqword=data.frame(term=names(totfreq),occurrences=totfreq)
+p <- ggplot(subset(freqword, totfreq>25), aes(term, occurrences))
+p <- p + geom_bar(stat="identity")
+p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))
+p
+
+#setting the same seed each time ensures consistent look across clouds
+set.seed(123, sample.kind="Rounding")
+#limit words by specifying min frequency
+wordcloud(names(totfreq),totfreq, min.freq=25)
+
+```
+
+Now let us use this transpose the words in the twitter text into columns so that each row can be analyzed for each of the frequently used words. This enables us to create a co-relation across words and map the same to the reported sentiment. 
+
+```{r 3.04 Transpose the words, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+freqDocs <- removeSparseTerms(tweet_docMatrix, 0.995)
+freqTweets <- as.data.frame(as.matrix(freqDocs))
+colnames(freqTweets) <- make.names(colnames(freqTweets))
+
+freqTweets$sentiment <- tweets$sentiment
+freqTweets$senti_text <- tweets$senti_text
+tibble(freqTweets)
+nrow(freqTweets)
+ncol(freqTweets)
+```
+
+This dataset now has 310 columns for each of the 1887 rows and it has a count of the number of occurences of the word in that row. This matrix now lends itself to be used for predicting the sentiment - "P"-Positive or "N"-Negative for any tweet or short text that gets posted. 
+
+## Regression Model to predict the twitter sentiment.
+Lets first start with a regression model to predict the sentiment. As we do for all machine learning models, we partition the dataset into a train and test set. We use the train set to train the model and then we evaluate or predict the outcome based on the test set. We then use the accuracy from the confusionMatrix function of the caret package to compare how our algorithms behaved.
+
+```{r 3.05 Prepare for ML, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+set.seed(123, sample.kind="Rounding")
+test_index <- createDataPartition(freqTweets$senti_text, times = 1, p = 0.7, list = FALSE)
+train_set <- freqTweets %>% slice(-test_index)
+test_set <- freqTweets %>% slice(test_index)
+
+lm_fit <- mutate(train_set, y = as.numeric(senti_text == "P")) %>% lm(y ~ ., data = .)
+p_hat <- predict(lm_fit, test_set)
+y_hat <- ifelse(p_hat == 1, "P", "N") %>% factor()
+confusionMatrix(y_hat, test_set$senti_text)
+
+confusionMatrix(y_hat, test_set$senti_text)$overall[["Accuracy"]]
+```
+
+So using a simple regression model, we have been able to predict the sentiment with a 0.9168 accuracy. Now, lets explore another algorithms - the K-Nearest Neighbour (KNN) and see how it behaves.
+
+```{r 3.06 KNN, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+train_knn <- train(senti_text ~ ., method = "knn", data = train_set)
+y_hat_knn <- predict(train_knn, test_set, type = "raw")
+confusionMatrix(y_hat_knn, test_set$senti_text)
+
+confusionMatrix(y_hat_knn, test_set$senti_text)$overall[["Accuracy"]]
+```
+The KNN model give us an accuracy of 0.9924 This makes sense as the KNN model creates a nearness algorithms between different words that contribute to the sentiment instead of just taking a look at one word at a time giving us a higher accuracy. Lets also explore the random forest algrithm.
+
+```{r 3.07 Random Forest, message=FALSE, warning=FALSE,eval=TRUE,echo=TRUE}
+train_RF <- randomForest(senti_text ~ . , data = train_set)
+predict_RF <- predict(train_RF, newdata = test_set)
+confusionMatrix(predict_RF, test_set$senti_text)
+
+confusionMatrix(predict_RF, test_set$senti_text)$overall["Accuracy"]
+```
+The random forest gives us an accuracy of 0.9969. Keep in mind that the dataset is small and within this limited set we have a larger set of negative sentiment as compared to the positive sentiment. But even with this, we now have an approach where we can use different algorithms to compare the sentiment across various social network postings and identifying a sentiment for a product or service.
+
+# Summary and Conclusion
+Sentiment analysis using text data from social media like twitter and comments and posts from different sites is a great way to glean user sentiment from a broad worldwide audience in near real time. While a basic sentiment analysis can be done using a pre-defined dictionary, using datasets and applying machine learning algorithms are more effective is providing better accuracy for our sentiment predictions.
+
+However, this project continues to have many *limitations*. To begin with the dataset was small and very specific to apple products. As the number of comments increases, the number of words also increases. This can dramatically increase the sparse matrix and can make the computation very heavy. While other limitations like ability to detect double negatives ("not bad") is better, the algorithm is still not very effective at detecting sarcasm.
+
+Going forward, as part of the *future work*, the text mapping can be fine tuned. For example, words appearing in the same sentence have more weight than ones that appear across sentences. The sequence of words ("not bad", vs "bad, not") can also be mapped for a better co-relation between text construction and the sentiment. Lastly, people across the globe use different writing styles and new media platforms like twitter encourages short texts (nb - for not bad) or the use of emojis. This makes identifying sentiment from such posts much more challenging. All these can be taken into account to further fine tune the sentiment prediction based on text comments.
+
+# References and Citation
+
+1. https://rafalab.github.io/dsbook/text-mining.html#sentiment-analysis
+2. http://www.sthda.com/english/wiki/text-mining-and-word-cloud-fundamentals-in-r-5-simple-steps-you-should-know
+3. https://eight2late.wordpress.com/2015/05/27/a-gentle-introduction-to-text-mining-using-r/
+ 
+
